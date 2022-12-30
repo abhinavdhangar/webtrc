@@ -1,28 +1,55 @@
-import { Box, Button, Divider, Flex, Icon, Text, Textarea, useColorMode, useColorStyle } from '@tonic-ui/react';
-import { useConst } from '@tonic-ui/react-hooks';
-import { useEffect, useReducer, useRef, useState } from 'react';
-import CopyTrigger from './CopyTrigger';
+import {
+  Box,
+  Button,
+  Divider,
+  Flex,
+  Icon,
+  Text,
+  Textarea,
+  useColorMode,
+  useColorStyle,
+} from "@tonic-ui/react";
+import ReactPlayer from 'react-player'
+import { useConst } from "@tonic-ui/react-hooks";
+import { useEffect, useReducer, useRef, useState } from "react";
+import CopyTrigger from "./CopyTrigger";
+import io from "socket.io-client";
 
 const x = (...args) => JSON.stringify(...args);
 
 const WebRTCClient = () => {
   const [colorMode] = useColorMode();
   const [colorStyle] = useColorStyle({ colorMode });
-  const [sessionDescriptionProtocol, setSessionDescriptionProtocol] = useState();
-  const [remoteSessionDescriptionText, setRemoteSessionDescriptionText] = useState('');
-  const [remoteICECandidateText, setRemoteICECandidateText] = useState('');
-  const [remoteSessionDescription, setRemoteSessionDescription] = useState(null);
+  const [sessionDescriptionProtocol, setSessionDescriptionProtocol] =
+    useState();
+  const [remoteSessionDescriptionText, setRemoteSessionDescriptionText] =
+    useState("");
+  const [remoteICECandidateText, setRemoteICECandidateText] = useState("");
+  const [remoteSessionDescription, setRemoteSessionDescription] =
+    useState(null);
   const [remoteICECandidate, setRemoteICECandidate] = useState(null);
+  const [otherUserID, setOtherUserID] = useState("");
   const localVideoRef = useRef();
   const remoteVideoRef = useRef();
   const peerConnectionRef = useRef();
-  const rtcICECandidateMap = useConst(() => new Map());
+  const [users, setUsers] = useState([]);
+  const [rtcICECandidateMap, setrtcICECandidateMap] = useState(() => new Map());
+  // const rtcICECandidateMap = useConst(() => new Map());
   const forceUpdate = useReducer(() => ({}))[1];
+  const [iceError, setIceError] = useState(false);
+  const [socket, setSocket] = useState(null);
+  useEffect(() => {
+    const socketIo = io("https://vgint7-3004.preview.csb.app/");
+    setSocket(socketIo);
+    return () => {
+      socketIo.disconnect();
+    };
+  }, []);
 
   const getUserMedia = async () => {
     const constraints = {
-      audio: false,
-      video: true,
+      audio: true,
+    video:true
     };
 
     try {
@@ -30,7 +57,7 @@ const WebRTCClient = () => {
         // https://ithelp.ithome.com.tw/articles/10252371
         iceServers: [
           {
-            url: 'stun:stun.l.google.com:19302',
+            url: "stun:stun.l.google.com:19302",
           },
           /*
           {
@@ -41,28 +68,34 @@ const WebRTCClient = () => {
           */
         ],
       });
-      const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      const mediaStream = await navigator.mediaDevices.getUserMedia(
+        constraints
+      );
       localVideoRef.current.srcObject = mediaStream;
 
       mediaStream.getTracks().forEach((mediaStreamTrack) => {
-        console.log('MediaStreamTrack:', mediaStreamTrack);
+        console.log("MediaStreamTrack:", mediaStreamTrack);
         peerConnection.addTrack(mediaStreamTrack, mediaStream);
       });
 
       peerConnection.onicecandidate = (event) => {
         const candidate = event.candidate;
+        let dd = rtcICECandidateMap;
         if (!candidate) {
           return;
         }
-        rtcICECandidateMap.set(candidate.candidate, candidate);
+        dd.set(candidate.candidate, candidate);
+        console.log("adding ice ");
+        setIceError(true);
+        setrtcICECandidateMap(dd);
         forceUpdate();
       };
       peerConnection.oniceconnectionstatechange = (e) => {
-        console.log('peerConnection.oniceconnectionstatechange:', e);
+        console.log("peerConnection.oniceconnectionstatechange:", e);
       };
       peerConnection.ontrack = (e) => {
         // received remote video streams
-        console.log('peerConnection.ontrack:', e);
+        console.log("peerConnection.ontrack:", e);
         if (Array.isArray(e.streams)) {
           remoteVideoRef.current.srcObject = e.streams[0];
         }
@@ -70,7 +103,7 @@ const WebRTCClient = () => {
 
       peerConnectionRef.current = peerConnection;
     } catch (e) {
-      console.error('getUserMedia Error:', e);
+      console.error("getUserMedia Error:", e);
     }
   };
 
@@ -94,6 +127,7 @@ const WebRTCClient = () => {
         //offerToReceiveVideo: 1, // deprecated
       });
       setSessionDescriptionProtocol(sdp);
+      console.log("creating answer");
       peerConnectionRef.current.setLocalDescription(sdp);
     } catch (e) {
       console.error(e);
@@ -109,7 +143,9 @@ const WebRTCClient = () => {
   };
 
   const handleClickSetRemoteSessionDescription = () => {
-    const rtcSessionDescription = new RTCSessionDescription(remoteSessionDescriptionText);
+    const rtcSessionDescription = new RTCSessionDescription(
+      remoteSessionDescriptionText
+    );
     setRemoteSessionDescription(rtcSessionDescription);
     peerConnectionRef.current.setRemoteDescription(rtcSessionDescription);
   };
@@ -119,31 +155,143 @@ const WebRTCClient = () => {
     setRemoteICECandidate(rtcICECandidate);
     peerConnectionRef.current.addIceCandidate(rtcICECandidate);
   };
-
+  const handleUpdateUsers = (users) => {
+    setUsers(users);
+  };
   useEffect(() => {
     getUserMedia();
   }, []);
+  useEffect(() => {
+    if (socket) {
+      socket.on("answer", ({ answer, candidate }) => {
+        console.log("answer is coming !");
+        const rtcSessionDescription = new RTCSessionDescription(answer);
+        // setRemoteSessionDescription(rtcSessionDescription);
+        peerConnectionRef.current.setRemoteDescription(rtcSessionDescription);
+        // console.log(answer);
+
+        // console.log(candidate);
+        const rtcICECandidate = new RTCIceCandidate(candidate);
+        // setRemoteICECandidate(rtcICECandidate);
+        peerConnectionRef.current.addIceCandidate(rtcICECandidate);
+      });
+      socket.on("offer", async ({ offer, candidate, id }) => {
+        console.log("offer is coming ");
+        setOtherUserID(id);
+        const rtcSessionDescription = new RTCSessionDescription(offer);
+        setRemoteSessionDescription(rtcSessionDescription);
+        peerConnectionRef.current.setRemoteDescription(rtcSessionDescription);
+        // console.log(offer);
+
+        // console.log(candidate);
+        const rtcICECandidate = new RTCIceCandidate(candidate);
+        setRemoteICECandidate(rtcICECandidate);
+        peerConnectionRef.current.addIceCandidate(rtcICECandidate);
+        // createAnswer();
+          const sdp = await peerConnectionRef.current.createAnswer({});
+      setSessionDescriptionProtocol(sdp);
+      console.log("creating answer");
+      peerConnectionRef.current.setLocalDescription(sdp);
+      });
+      socket.on("update-users", handleUpdateUsers);
+
+      return () => {
+        socket.off("update-users", handleUpdateUsers);
+
+        socket.on("offer", ({ offer, candidate }) => {
+          console.log("offer is coming off ");
+        });
+      };
+    }
+  }, [socket]);
+
+  useEffect(() => {
+    if (
+      rtcICECandidateMap.size > 0 &&
+      sessionDescriptionProtocol &&
+      otherUserID
+    ) {
+      const rtcICECandidates = Array.from(rtcICECandidateMap.values());
+      let candidate = rtcICECandidates[0];
+      console.log("hello addIceCandidate");
+      // console.log(candidate);
+      // console.log(JSON.parse({candidate}))
+      socket.emit("offer", sessionDescriptionProtocol, candidate, otherUserID);
+    }
+  }, [iceError, sessionDescriptionProtocol, otherUserID]);
+  // useEffect(() => {
+  //   if (remoteSessionDescription && remoteICECandidate && otherUserID) {
+  //     console.log("sending answer",otherUserID)
+  //     socket.emit(
+  //       "answer",
+  //       remoteSessionDescription,
+  //       remoteICECandidate,
+  //       otherUserID
+  //     );
+  //   }
+  // }, [remoteSessionDescription, remoteICECandidate,otherUserID]);
+
+  const createAdvancedOffer = async (id) => {
+    try {
+      const sdp = await peerConnectionRef.current.createOffer({});
+      setSessionDescriptionProtocol(sdp);
+      peerConnectionRef.current.setLocalDescription(sdp);
+      setOtherUserID(id);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    if (users) {
+    }
+  }, [users]);
 
   const canCreateOffer = true;
   const canCreateAnswer = !!remoteSessionDescriptionText;
   const rtcICECandidates = Array.from(rtcICECandidateMap.values());
+const declineCall = ()=>{
+setSessionDescriptionProtocol('')
+  setRemoteSessionDescription('')
+  setrtcICECandidateMap(()=>new Map())
+  setRemoteICECandidate('')
+setIceError(false)
 
+ peerConnectionRef.current.close()
+const peerConnection = new RTCPeerConnection();
+ peerConnectionRef.current = peerConnection
+}
   return (
     <Flex direction="column" rowGap="6x" px="6x" py="4x">
       <Flex columnGap="4x" mb="4x">
+        <button onClick={declineCall}>decline</button>
         <Flex flex="1" direction="column">
           <Box mb="2x">
             <Text>Local Camera</Text>
           </Box>
-          <Flex background={colorStyle.background.secondary} alignItems="center" justifyContent="center" height="100%" p="4x">
-            <Box as="video" ref={localVideoRef} autoPlay width={360} />
+          <Flex
+            background={colorStyle.background.secondary}
+            alignItems="center"
+            justifyContent="center"
+            height="100%"
+            p="4x"
+          >
+            {/* <ReactPlayer width={360} muted playing ref={localVideoRef}/> */}
+            <Box as="video" ref={localVideoRef} muted  autoPlay width={360} />
           </Flex>
         </Flex>
         <Flex flex="1" direction="column">
           <Box mb="2x">
             <Text>Remote Camera</Text>
           </Box>
-          <Flex background={colorStyle.background.secondary} alignItems="center" justifyContent="center" height="100%" p="4x">
+          <Flex
+            background={colorStyle.background.secondary}
+            alignItems="center"
+            justifyContent="center"
+            height="100%"
+            p="4x"
+          >
+            {/* <ReactPlayer playing ref={remoteVideoRef}/> */}
             <Box as="video" ref={remoteVideoRef} autoPlay width={360} />
           </Flex>
         </Flex>
@@ -160,6 +308,13 @@ const WebRTCClient = () => {
           <Button disabled={!canCreateAnswer} onClick={handleClickCreateAnswer}>
             Create Answer
           </Button>
+          <div>
+            {users.map((user) => (
+              <button key={user} onClick={() => createAdvancedOffer(user)}>
+                {user}
+              </button>
+            ))}
+          </div>
         </Flex>
         <Box mb="4x">
           <Textarea
@@ -181,7 +336,8 @@ const WebRTCClient = () => {
                 _hover={{
                   backgroundColor: colorStyle.background.tertiary,
                 }}
-                alignItems="center">
+                alignItems="center"
+              >
                 <Box>
                   <CopyTrigger>
                     {({ copied, copy }) => (
@@ -189,12 +345,13 @@ const WebRTCClient = () => {
                         onClick={() => {
                           const text = x(candidate);
                           navigator.clipboard.writeText(text).then(
-                            (success) => console.log('text copied'),
-                            (err) => console.log('failed to copy text'),
+                            (success) => console.log("text copied"),
+                            (err) => console.log("failed to copy text")
                           );
                           copy();
-                        }}>
-                        {copied ? 'Copied' : 'Copy'}
+                        }}
+                      >
+                        {copied ? "Copied" : "Copy"}
                       </Button>
                     )}
                   </CopyTrigger>
@@ -213,10 +370,15 @@ const WebRTCClient = () => {
           <Text>Remote Session Description:</Text>
         </Box>
         <Flex columnGap="2x" mb="4x" alignItems="center">
-          <Button disabled={!remoteSessionDescriptionText} onClick={handleClickSetRemoteSessionDescription}>
+          <Button
+            disabled={!remoteSessionDescriptionText}
+            onClick={handleClickSetRemoteSessionDescription}
+          >
             Set Remote Session Description
           </Button>
-          {remoteSessionDescriptionText && remoteSessionDescription && <Icon icon="check" color="green" />}
+          {remoteSessionDescriptionText && remoteSessionDescription && (
+            <Icon icon="check" color="green" />
+          )}
         </Flex>
         <Textarea
           resize="vertical"
@@ -226,7 +388,7 @@ const WebRTCClient = () => {
               const value = JSON.parse(event.target.value);
               setRemoteSessionDescriptionText(value);
             } catch (err) {
-              setRemoteSessionDescriptionText('');
+              setRemoteSessionDescriptionText("");
             }
           }}
           onFocus={(event) => {
@@ -239,10 +401,15 @@ const WebRTCClient = () => {
       <Box>
         <Text mb="4x">Remote ICE Candidate:</Text>
         <Flex columnGap="2x" mb="4x" alignItems="center">
-          <Button disabled={!remoteICECandidateText} onClick={handleClickAddRemoteICECandidate}>
+          <Button
+            disabled={!remoteICECandidateText}
+            onClick={handleClickAddRemoteICECandidate}
+          >
             Add Remote ICE Candidate
           </Button>
-          {remoteICECandidateText && remoteICECandidate && <Icon icon="check" color="green" />}
+          {remoteICECandidateText && remoteICECandidate && (
+            <Icon icon="check" color="green" />
+          )}
         </Flex>
         <Textarea
           resize="vertical"
@@ -252,7 +419,7 @@ const WebRTCClient = () => {
               const value = JSON.parse(event.target.value);
               setRemoteICECandidateText(value);
             } catch (err) {
-              setRemoteICECandidateText('');
+              setRemoteICECandidateText("");
             }
           }}
           onFocus={(event) => {
