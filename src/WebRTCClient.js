@@ -9,12 +9,13 @@ import {
   useColorMode,
   useColorStyle,
 } from "@tonic-ui/react";
-import ReactPlayer from 'react-player'
+import WebCam from "./components/WebCam";
+import ReactPlayer from "react-player";
 import { useConst } from "@tonic-ui/react-hooks";
 import { useEffect, useReducer, useRef, useState } from "react";
 import CopyTrigger from "./CopyTrigger";
 import io from "socket.io-client";
-
+import NameForm from "./components/NameForm";
 const x = (...args) => JSON.stringify(...args);
 
 const WebRTCClient = () => {
@@ -22,6 +23,7 @@ const WebRTCClient = () => {
   const [colorStyle] = useColorStyle({ colorMode });
   const [sessionDescriptionProtocol, setSessionDescriptionProtocol] =
     useState();
+    const [myID,setMyID] = useState('')
   const [remoteSessionDescriptionText, setRemoteSessionDescriptionText] =
     useState("");
   const [remoteICECandidateText, setRemoteICECandidateText] = useState("");
@@ -30,8 +32,11 @@ const WebRTCClient = () => {
   const [remoteICECandidate, setRemoteICECandidate] = useState(null);
   const [otherUserID, setOtherUserID] = useState("");
   const localVideoRef = useRef();
+  const [isUserCallingButtonDisabled,setIsUserCallingButtonDisabled] = useState(false)
   const remoteVideoRef = useRef();
   const peerConnectionRef = useRef();
+  const [myName, setMyName] = useState("");
+  const [isCallSender, setIsCallSender] = useState(false);
   const [users, setUsers] = useState([]);
   const [rtcICECandidateMap, setrtcICECandidateMap] = useState(() => new Map());
   // const rtcICECandidateMap = useConst(() => new Map());
@@ -49,7 +54,7 @@ const WebRTCClient = () => {
   const getUserMedia = async () => {
     const constraints = {
       audio: true,
-    video:true
+      video: true,
     };
 
     try {
@@ -122,10 +127,7 @@ const WebRTCClient = () => {
 
   const createAnswer = async () => {
     try {
-      const sdp = await peerConnectionRef.current.createAnswer({
-        //offerToReceiveAudio: 1, // deprecated
-        //offerToReceiveVideo: 1, // deprecated
-      });
+      const sdp = await peerConnectionRef.current.createAnswer({});
       setSessionDescriptionProtocol(sdp);
       console.log("creating answer");
       peerConnectionRef.current.setLocalDescription(sdp);
@@ -161,6 +163,12 @@ const WebRTCClient = () => {
   useEffect(() => {
     getUserMedia();
   }, []);
+
+  const handleEndCall = () => {
+    console.log("ending call ");
+
+    window.location.reload();
+  };
   useEffect(() => {
     if (socket) {
       socket.on("answer", ({ answer, candidate }) => {
@@ -179,7 +187,9 @@ const WebRTCClient = () => {
         console.log("offer is coming ");
         setOtherUserID(id);
         const rtcSessionDescription = new RTCSessionDescription(offer);
+        
         setRemoteSessionDescription(rtcSessionDescription);
+        
         peerConnectionRef.current.setRemoteDescription(rtcSessionDescription);
         // console.log(offer);
 
@@ -188,13 +198,21 @@ const WebRTCClient = () => {
         setRemoteICECandidate(rtcICECandidate);
         peerConnectionRef.current.addIceCandidate(rtcICECandidate);
         // createAnswer();
+        if (!isCallSender) {
           const sdp = await peerConnectionRef.current.createAnswer({});
-      setSessionDescriptionProtocol(sdp);
-      console.log("creating answer");
-      peerConnectionRef.current.setLocalDescription(sdp);
+          setSessionDescriptionProtocol(sdp);
+          console.log("creating answer");
+          peerConnectionRef.current.setLocalDescription(sdp);
+          setIsUserCallingButtonDisabled(true)
+        }
+      
       });
+      socket.on("you",(id)=>{
+        setMyID(id)
+        console.log("thisi is id",id)
+      })
       socket.on("update-users", handleUpdateUsers);
-
+      socket.on("end-call", handleEndCall);
       return () => {
         socket.off("update-users", handleUpdateUsers);
 
@@ -236,6 +254,8 @@ const WebRTCClient = () => {
       const sdp = await peerConnectionRef.current.createOffer({});
       setSessionDescriptionProtocol(sdp);
       peerConnectionRef.current.setLocalDescription(sdp);
+      console.log("making call ");
+      setIsUserCallingButtonDisabled(true)
       setOtherUserID(id);
     } catch (e) {
       console.error(e);
@@ -250,184 +270,48 @@ const WebRTCClient = () => {
   const canCreateOffer = true;
   const canCreateAnswer = !!remoteSessionDescriptionText;
   const rtcICECandidates = Array.from(rtcICECandidateMap.values());
-const declineCall = ()=>{
-setSessionDescriptionProtocol('')
-  setRemoteSessionDescription('')
-  setrtcICECandidateMap(()=>new Map())
-  setRemoteICECandidate('')
-setIceError(false)
+  const endCall = () => {
+    console.log("ending call ");
+    setSessionDescriptionProtocol(null);
+    setRemoteSessionDescription(null);
+    setOtherUserID(null);
+    setIsUserCallingButtonDisabled(false)
+    setrtcICECandidateMap(() => new Map());
+    setRemoteICECandidate(null);
+    setIceError(false);
+    remoteVideoRef.current.srcObject = null;
+    peerConnectionRef.current.close();
 
- peerConnectionRef.current.close()
-const peerConnection = new RTCPeerConnection();
- peerConnectionRef.current = peerConnection
-}
+    getUserMedia();
+    socket.emit("end-call", otherUserID);
+  };
   return (
     <Flex direction="column" rowGap="6x" px="6x" py="4x">
-      <Flex columnGap="4x" mb="4x">
-        <button onClick={declineCall}>decline</button>
-        <Flex flex="1" direction="column">
-          <Box mb="2x">
-            <Text>Local Camera</Text>
-          </Box>
-          <Flex
-            background={colorStyle.background.secondary}
-            alignItems="center"
-            justifyContent="center"
-            height="100%"
-            p="4x"
-          >
-            {/* <ReactPlayer width={360} muted playing ref={localVideoRef}/> */}
-            <Box as="video" ref={localVideoRef} muted  autoPlay width={360} />
-          </Flex>
-        </Flex>
-        <Flex flex="1" direction="column">
-          <Box mb="2x">
-            <Text>Remote Camera</Text>
-          </Box>
-          <Flex
-            background={colorStyle.background.secondary}
-            alignItems="center"
-            justifyContent="center"
-            height="100%"
-            p="4x"
-          >
-            {/* <ReactPlayer playing ref={remoteVideoRef}/> */}
-            <Box as="video" ref={remoteVideoRef} autoPlay width={360} />
-          </Flex>
-        </Flex>
-      </Flex>
+      <WebCam
+      myName={myName}
+        localVideoRef={localVideoRef}
+        remoteVideoRef={remoteVideoRef}
+        endCall={endCall}
+      />
+      <div>
+        {!myName && (
+          <NameForm myName={myName} socket={socket} setMyName={setMyName} />
+        )}{" "}
+        <div></div>
+      </div>
       <Divider />
-      <Box>
-        <Box mb="4x">
-          <Text>Session Description:</Text>
-        </Box>
-        <Flex columnGap="2x" mb="4x">
-          <Button disabled={!canCreateOffer} onClick={handleClickCreateOffer}>
-            Create Offer
-          </Button>
-          <Button disabled={!canCreateAnswer} onClick={handleClickCreateAnswer}>
-            Create Answer
-          </Button>
-          <div>
-            {users.map((user) => (
-              <button key={user} onClick={() => createAdvancedOffer(user)}>
-                {user}
-              </button>
-            ))}
-          </div>
-        </Flex>
-        <Box mb="4x">
-          <Textarea
-            value={x(sessionDescriptionProtocol, null, 4)}
-            readOnly
-            resize="vertical"
-            rows="5"
-            onFocus={(event) => {
-              event.target.select();
-            }}
-          />
-        </Box>
-        <Flex direction="column" rowGap="2x">
-          {rtcICECandidates.map((candidate) => {
-            return (
-              <Flex
-                key={candidate.candidate}
-                backgroundColor={colorStyle.background.secondary}
-                _hover={{
-                  backgroundColor: colorStyle.background.tertiary,
-                }}
-                alignItems="center"
-              >
-                <Box>
-                  <CopyTrigger>
-                    {({ copied, copy }) => (
-                      <Button
-                        onClick={() => {
-                          const text = x(candidate);
-                          navigator.clipboard.writeText(text).then(
-                            (success) => console.log("text copied"),
-                            (err) => console.log("failed to copy text")
-                          );
-                          copy();
-                        }}
-                      >
-                        {copied ? "Copied" : "Copy"}
-                      </Button>
-                    )}
-                  </CopyTrigger>
-                </Box>
-                <Box px="3x">
-                  <Text whiteSpace="nowrap">{x(candidate)}</Text>
-                </Box>
-              </Flex>
-            );
-          })}
-        </Flex>
-      </Box>
-      <Divider />
-      <Box>
-        <Box mb="4x">
-          <Text>Remote Session Description:</Text>
-        </Box>
-        <Flex columnGap="2x" mb="4x" alignItems="center">
-          <Button
-            disabled={!remoteSessionDescriptionText}
-            onClick={handleClickSetRemoteSessionDescription}
-          >
-            Set Remote Session Description
-          </Button>
-          {remoteSessionDescriptionText && remoteSessionDescription && (
-            <Icon icon="check" color="green" />
-          )}
-        </Flex>
-        <Textarea
-          resize="vertical"
-          rows="5"
-          onChange={(event) => {
-            try {
-              const value = JSON.parse(event.target.value);
-              setRemoteSessionDescriptionText(value);
-            } catch (err) {
-              setRemoteSessionDescriptionText("");
-            }
-          }}
-          onFocus={(event) => {
-            event.target.select();
-          }}
-          placeholder="Paste a remote SDP here"
-        />
-      </Box>
-      <Divider />
-      <Box>
-        <Text mb="4x">Remote ICE Candidate:</Text>
-        <Flex columnGap="2x" mb="4x" alignItems="center">
-          <Button
-            disabled={!remoteICECandidateText}
-            onClick={handleClickAddRemoteICECandidate}
-          >
-            Add Remote ICE Candidate
-          </Button>
-          {remoteICECandidateText && remoteICECandidate && (
-            <Icon icon="check" color="green" />
-          )}
-        </Flex>
-        <Textarea
-          resize="vertical"
-          rows="2"
-          onChange={(event) => {
-            try {
-              const value = JSON.parse(event.target.value);
-              setRemoteICECandidateText(value);
-            } catch (err) {
-              setRemoteICECandidateText("");
-            }
-          }}
-          onFocus={(event) => {
-            event.target.select();
-          }}
-          placeholder="Paste a remote candidate here"
-        />
-      </Box>
+      <button onClick={() => console.log(myName)}>mc stan</button>
+
+      {myName && (
+        <div>
+          <p>{users.length-1} users are live !</p>
+          {users.map((user) => (
+           user.id!=myID && <button disabled={isUserCallingButtonDisabled} className="bg-red-300" onClick={() => createAdvancedOffer(user.id)} key={user.id}>
+              {user.name}
+            </button>
+          ))}
+        </div>
+      )}
     </Flex>
   );
 };

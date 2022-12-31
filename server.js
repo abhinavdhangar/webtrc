@@ -17,12 +17,16 @@ server.listen(port, () => {
 
 io.on("connection", (socket) => {
   console.log("A user connected");
-
-  connectedUsers.push(socket.id);
+  
+  socket.on("name",(name)=>{
+    let user = {name,id:socket.id}
+  connectedUsers.push(user);
   io.emit("update-users", connectedUsers);
+    io.to(socket.id).emit("you",socket.id)
+  })
   socket.on("disconnect", () => {
     console.log("A user disconnected");
-    connectedUsers = connectedUsers.filter((user) => user !== socket.id);
+    connectedUsers = connectedUsers.filter((user) => user.id !== socket.id);
     io.emit("update-users", connectedUsers);
   });
 
@@ -34,6 +38,9 @@ io.on("connection", (socket) => {
     console.log("its answer");
     socket.to(toId).emit("answer", { answer, candidate });
   });
+  socket.on("end-call",(id)=>{
+    socket.to(id).emit("end-call",{id})
+  })
 
   socket.on("candidate", (candidate, toId) => {
     socket.to(toId).emit("candidate", candidate);
